@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">
+  <label>Integration User</label>
+  <description
+  >Permissions for an integration user that creates/updates Orders and publishes OrderActivated events.</description>
+  <hasActivationRequired>false</hasActivationRequired>
+
+  <!-- Allow the integration user to create and update Orders -->
+  <objectPermissions>
+    <allowCreate>true</allowCreate>
+    <allowDelete>false</allowDelete>
+    <allowEdit>true</allowEdit>
+    <allowRead>true</allowRead>
+    <modifyAllRecords>false</modifyAllRecords>
+    <viewAllRecords>false</viewAllRecords>
+    <object>Order</object>
+  </objectPermissions>
+
+  <!-- If you need the integration user to publish or manage the platform event, include permissions on the platform event object as well -->
+  <objectPermissions>
+    <allowCreate>true</allowCreate>
+    <allowDelete>false</allowDelete>
+    <allowEdit>false</allowEdit>
+    <allowRead>true</allowRead>
+    <modifyAllRecords>false</modifyAllRecords>
+    <viewAllRecords>false</viewAllRecords>
+    <object>OrderActivated__e</object>
+  </objectPermissions>
+
+</PermissionSet>

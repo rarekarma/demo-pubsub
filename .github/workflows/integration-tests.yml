@@ -1,0 +1,97 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 2 * * *" # Daily at 2 AM
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  integration-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: |
+          npm install
+          npm install -g @salesforce/cli
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Decode SF JWT key
+        env:
+          SK_KEY_BASE64: ${{ secrets.SK_KEY_BASE64 }}
+        run: |
+          if [ -z "$SK_KEY_BASE64" ]; then echo "SK_KEY_BASE64 is missing"; exit 1; fi
+          echo "$SK_KEY_BASE64" | base64 --decode > /tmp/server.key
+          chmod 600 /tmp/server.key
+
+      - name: Auth to Dev Hub
+        env:
+          SK_CLIENTID: ${{ secrets.SK_CLIENTID }}
+          SK_USER: ${{ secrets.SK_USER }}
+          SK_AUTH_URL: ${{ secrets.SK_AUTH_URL }}
+          SK_CLIENT_SECRET: ${{ secrets.SK_CLIENT_SECRET }}
+        run: |
+          if [ -z "$SK_CLIENTID" ]; then echo "Missing required SK_CLIENTID secret"; exit 1; fi
+          sf auth jwt grant \
+            --client-id "$SK_CLIENTID" \
+            --jwt-key-file /tmp/server.key \
+            --username "$SK_USER" \
+            --instance-url "$SK_AUTH_URL" \
+            --set-default-dev-hub
+
+      - name: Create scratch org
+        run: |
+          sf org create scratch \
+            --definition-file config/project-scratch-def.json \
+            --duration-days 1 \
+            --alias ci-scratch --wait 60
+
+      - name: Run two-step deploy (objects first)
+        env:
+          ORG: ci-scratch
+        run: |
+          chmod +x ./scripts/deploy.sh
+          ./scripts/deploy.sh ci-scratch
+
+      - name: Assign Integration_User permission set
+        run: |
+          sf org assign permset \
+            --name Integration_User \
+            --target-org ci-scratch
+
+      - name: Get scratch org credentials
+        run: |
+          # Get the scratch org info and export as env vars for the middleware
+          SCRATCH_INFO=$(sf org display --target-org ci-scratch --json)
+          echo "SCRATCH_ACCESS_TOKEN=$(echo $SCRATCH_INFO | jq -r '.result.accessToken')" >> $GITHUB_ENV
+          echo "SCRATCH_INSTANCE_URL=$(echo $SCRATCH_INFO | jq -r '.result.instanceUrl')" >> $GITHUB_ENV
+          echo "SCRATCH_ORG_ID=$(echo $SCRATCH_INFO | jq -r '.result.id')" >> $GITHUB_ENV
+
+      - name: Run Middleware Integration Test
+        env:
+          SCRATCH_ACCESS_TOKEN: ${{ env.SCRATCH_ACCESS_TOKEN }}
+          SCRATCH_INSTANCE_URL: ${{ env.SCRATCH_INSTANCE_URL }}
+          SCRATCH_ORG_ID: ${{ env.SCRATCH_ORG_ID }}
+        run: |
+          node --loader ts-node/esm scripts/test-middleware-integration.ts
+
+      # Removed upload-artifact step since no results file is produced
+
+      - name: Delete scratch org
+        if: always()
+        run: |
+          sf org delete scratch --target-org ci-scratch --no-prompt || true

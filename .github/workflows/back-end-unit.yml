@@ -1,0 +1,90 @@
+name: Back-end Unit Tests
+
+on:
+  push:
+    branches:
+      - main
+      - ci/**
+  pull_request:
+    branches: [main]
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Install Salesforce CLI
+        run: |
+          # Use the supported npm installer for GitHub Actions runners
+          npm install -g @salesforce/cli
+
+      - name: Decode SF JWT key
+        env:
+          SK_KEY_BASE64: ${{ secrets.SK_KEY_BASE64 }}
+        run: |
+          if [ -z "$SK_KEY_BASE64" ]; then echo "SK_KEY_BASE64 is missing"; exit 1; fi
+          echo "$SK_KEY_BASE64" | base64 --decode > /tmp/server.key
+          chmod 600 /tmp/server.key
+
+      - name: Auth to Dev Hub
+        env:
+          SK_CLIENTID: ${{ secrets.SK_CLIENTID }}
+          SK_USER: ${{ secrets.SK_USER }}
+          SK_AUTH_URL: ${{ secrets.SK_AUTH_URL }}
+        run: |
+          if [ -z "$SK_CLIENTID" ]; then echo "Missing required SK_CLIENTID secret"; exit 1; fi
+          sf auth jwt grant \
+            --client-id "$SK_CLIENTID" \
+            --jwt-key-file /tmp/server.key \
+            --username "$SK_USER" \
+            --instance-url "$SK_AUTH_URL" \
+            --set-default-dev-hub
+
+      - name: Create scratch org
+        run: |
+          sf org create scratch \
+            --definition-file config/project-scratch-def.json \
+            --duration-days 1 \
+            --alias ci-scratch --wait 60
+
+      - name: Run two-step deploy (objects first)
+        env:
+          ORG: ci-scratch
+        run: |
+          chmod +x ./scripts/deploy.sh
+          ./scripts/deploy.sh ci-scratch
+
+      - name: Run Unit Tests
+        run: |
+          sf apex test run \
+            --target-org ci-scratch \
+            --test-level RunSpecifiedTests \
+            --class-names OrderEventPublisherTest,OrderTriggerTest \
+            --wait 10 \
+            --json > /tmp/unit-test-results.json
+          jq . /tmp/unit-test-results.json
+
+      - name: Upload test results
+        if: ${{ !env.ACT }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: /tmp/unit-test-results.json
+
+      - name: Delete scratch org
+        if: always()
+        run: |
+          sf org delete scratch --target-org ci-scratch --no-prompt || true

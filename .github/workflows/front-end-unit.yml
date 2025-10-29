@@ -1,0 +1,41 @@
+name: Front-end Unit Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint (Aura/LWC JS)
+        run: |
+          # Run lint only if there are LWC/Aura JS files
+          if git ls-files '**/{aura,lwc}/**/*.js' | grep -q .; then
+            npm run lint
+          else
+            echo "No Aura/LWC JS files to lint"
+          fi
+
+      - name: Run unit tests (LWC Jest)
+        run: |
+          # Run unit tests only if there are test files or lwc components
+          if git ls-files '**/lwc/**/__tests__/**/*.js' '**/lwc/**/*.test.js' | grep -q .; then
+            npm test
+          else
+            echo "No LWC Jest tests found; skipping"
+          fi
