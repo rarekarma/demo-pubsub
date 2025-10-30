@@ -79,8 +79,19 @@ class MiddlewareIntegrationTest extends EventEmitter {
         }
       });
 
+      // Forward child stdout to parent console
+      this.middlewareProcess.stdout?.on('data', (data: Buffer) => {
+        const text = data.toString();
+        if (text.trim().length > 0) {
+          console.log(`[Middleware] ${text.trim()}`);
+        }
+      });
+
       this.middlewareProcess.stderr?.on('data', (data: Buffer) => {
-        console.error(`[Middleware Error] ${data.toString().trim()}`);
+        const text = data.toString();
+        if (text.trim().length > 0) {
+          console.log(`[Middleware Error] ${text.trim()}`);
+        }
       });
 
       this.middlewareProcess.on('close', (code: number | null) => {
@@ -116,7 +127,7 @@ class MiddlewareIntegrationTest extends EventEmitter {
       testProcess.on('close', async (code: number | null) => {
         if (code === 0) {
           console.log('✅ Events published successfully');
-          console.log(output);
+          // console.log(output);
           // Give events time to propagate to external subscribers
           console.log('⏳ Waiting 10 seconds for events to propagate...');
           await new Promise((resolveDelay) => setTimeout(resolveDelay, 10000));
@@ -134,7 +145,7 @@ class MiddlewareIntegrationTest extends EventEmitter {
 
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
-        reject(new Error(`Timeout: Expected ${this.expectedEvents} events, received ${this.eventsReceived.length}`));
+        reject(new Error(`  Timeout: Expected ${this.expectedEvents} events, received ${this.eventsReceived.length}`));
       }, this.testTimeout);
 
       const checkEvents = () => {

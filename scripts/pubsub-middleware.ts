@@ -12,12 +12,19 @@ type IpcMessage =
   | { type: 'timeout' }
   | { type: 'shutdown' };
 
+  const logger = {
+    debug: () => {},              // drop debug
+    info: console.log,
+    warn: console.warn,
+    error: console.error
+  };
+
 const client: any = new (PubSubApiClient as any)({
   authType: 'user-supplied',
   accessToken: process.env.SCRATCH_ACCESS_TOKEN,
   instanceUrl: process.env.SCRATCH_INSTANCE_URL,
   organizationId: process.env.SCRATCH_ORG_ID
-});
+}, logger);
 
 let eventsReceived = 0;
 let timeout: NodeJS.Timeout | undefined;
@@ -33,60 +40,54 @@ function safeSend(message: IpcMessage): void {
   }
 }
 
+function subscribeCallback(_subscription: any, callbackType: string, data: unknown): void {
+  switch (callbackType) {
+    case 'event': {
+      eventsReceived++;
+      console.log(
+        `📨 Received event ${eventsReceived}:`,
+        JSON.stringify(
+          data,
+          (key, value) => (typeof value === 'bigint' ? value.toString() : value),
+          2
+        )
+      );
+      safeSend({ type: 'event', count: eventsReceived });
+
+      // Exit successfully after receiving expected events (3 from OrderEventIntegrationTest)
+      if (eventsReceived >= 3 && !isShuttingDown) {
+        console.log(`✅ Successfully received ${eventsReceived} OrderActivated events!`);
+        safeSend({ type: 'done', count: eventsReceived });
+        process.exit(0);
+      }
+      break;
+    }
+    case 'error': {
+      console.error('❌ Subscription error:', data);
+      safeSend({ type: 'error', error: String(data) });
+      if (!isShuttingDown) {
+        process.exit(1);
+      }
+      break;
+    }
+    case 'end': {
+      console.log('🔚 Subscription ended');
+      safeSend({ type: 'end' });
+      break;
+    }
+    default:
+      break;
+  }
+}
+
 async function subscribeToOrderEvents(): Promise<void> {
   try {
     console.log('🔐 Connecting to Salesforce...');
-
     await client.connect();
-
     console.log('✅ Connected successfully');
-
     console.log('📡 Subscribing to OrderActivated__e events...');
-
-    // Prepare event callback
-    const subscribeCallback = (_subscription: any, callbackType: string, data: unknown) => {
-      switch (callbackType) {
-        case 'event': {
-          eventsReceived++;
-          console.log(
-            `📨 Received event ${eventsReceived}:`,
-            JSON.stringify(
-              data,
-              (key, value) => (typeof value === 'bigint' ? value.toString() : value),
-              2
-            )
-          );
-          safeSend({ type: 'event', count: eventsReceived });
-
-          // Exit successfully after receiving expected events (3 from OrderEventIntegrationTest)
-          if (eventsReceived >= 3 && !isShuttingDown) {
-            console.log(`✅ Successfully received ${eventsReceived} OrderActivated events!`);
-            safeSend({ type: 'done', count: eventsReceived });
-            process.exit(0);
-          }
-          break;
-        }
-        case 'error': {
-          console.error('❌ Subscription error:', data);
-          safeSend({ type: 'error', error: String(data) });
-          if (!isShuttingDown) {
-            process.exit(1);
-          }
-          break;
-        }
-        case 'end': {
-          console.log('🔚 Subscription ended');
-          safeSend({ type: 'end' });
-          break;
-        }
-        default:
-          break;
-      }
-    };
-
     // Request 3 events (based on OrderEventIntegrationTest which creates 3 orders)
     await client.subscribe('/event/OrderActivated__e', subscribeCallback, 3);
-
     console.log('✅ Subscribed to OrderActivated__e events...');
     safeSend({ type: 'ready' });
     console.log('⏳ Waiting for events...');
