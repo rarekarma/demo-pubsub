@@ -62,11 +62,15 @@ class MiddlewareIntegrationTest extends EventEmitter {
           console.log(`✅ Event received via IPC! Total: ${this.eventsReceived.length}`);
         }
         if (msg && msg.type === 'done') {
-          // Ensure our count matches child report
+          // Validate IPC communication integrity
           const reported = Number(msg.count || 0);
           if (reported > this.eventsReceived.length) {
             const delta = reported - this.eventsReceived.length;
-            for (let i = 0; i < delta; i++) this.eventsReceived.push({ via: 'ipc' });
+            reject(new Error(
+              `IPC communication issue: Child reported ${reported} events ` +
+              `but parent only received ${this.eventsReceived.length} individual event messages`
+            ));
+            return;
           }
         }
         if (msg && (msg.type === 'error' || msg.type === 'timeout')) {
